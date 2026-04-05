@@ -1,0 +1,55 @@
+module ins_decode(
+    input [3:0] ir,
+    input en,
+    output reg mova,
+    output reg movb,
+    output reg movc,
+    output reg movd,
+    output reg add,
+    output reg sub,
+    output reg jmp,
+    output reg jg,
+    output reg in1,
+    output reg out1,
+    output reg movi,
+    output reg halt
+);
+
+always @(ir, en) begin
+    // 默认所有输出信号清零
+    mova = 1'b0;
+    movb = 1'b0;
+    movc = 1'b0;
+    movd = 1'b0;
+    add = 1'b0;
+    sub = 1'b0;
+    jmp = 1'b0;
+    jg = 1'b0;
+    in1 = 1'b0;
+    out1 = 1'b0;
+    movi = 1'b0;
+    halt = 1'b0;
+
+    // 如果使能信号有效
+    if (en) begin
+        case (ir[3:0])
+            4'b0100: mova = 1'b1;
+            4'b0101: movb = 1'b1;
+            4'b0110: movc = 1'b1;
+            4'b0111: movd = 1'b1;
+            4'b1000: add = 1'b1;
+            4'b1001: sub = 1'b1;
+            4'b1010: jmp = 1'b1;
+            4'b1011: jg = 1'b1;
+            4'b1100: in1 = 1'b1;
+            4'b1101: out1 = 1'b1;
+            4'b1110: movi = 1'b1;
+            4'b1111: halt = 1'b1;
+            default: begin
+                // 默认情况下，所有输出信号保持清零状态
+            end
+        endcase
+    end
+end
+
+endmodule
