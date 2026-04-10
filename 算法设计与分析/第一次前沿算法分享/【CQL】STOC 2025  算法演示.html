@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STOC 2025 SSSP 算法突破演示</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 平滑过渡动画 */
+        .node, .edge, .distance-label {
+            transition: all 0.5s ease-in-out;
+        }
+        .data-item {
+            transition: all 0.3s ease;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 font-sans h-screen flex flex-col text-slate-800">
+
+    <!-- 顶栏 -->
+    <header class="bg-white shadow-sm py-4 px-6 z-10 relative">
+        <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-3">
+            <span class="bg-blue-600 text-white px-3 py-1 rounded-lg text-sm">STOC 2025</span>
+            打破排序障碍：单源最短路径 (SSSP) 算法对比
+        </h1>
+        <p class="text-sm text-slate-500 mt-1">演示网络特征：存在一批距离极近的节点(A/B/C/D)和一个较远的节点(E)，展示算法如何动态分块过滤。</p>
+    </header>
+
+    <!-- 主体内容区 -->
+    <main class="flex-1 flex flex-col lg:flex-row overflow-hidden p-6 gap-6">
+        
+        <!-- 左侧：图结构可视化 (Canvas/SVG) -->
+        <section class="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col">
+            <h2 class="text-lg font-semibold mb-4 text-slate-700">图网络状态</h2>
+            <div class="flex-1 relative bg-slate-50 rounded-xl border border-slate-100 overflow-hidden flex items-center justify-center">
+                <!-- 增加了 SVG 的高度以容纳新节点 E -->
+                <svg id="graph-svg" viewBox="0 0 500 420" class="w-full h-full max-w-2xl drop-shadow-sm">
+                    <defs>
+                        <!-- 箭头标记 -->
+                        <marker id="arrow-gray" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+                        </marker>
+                        <marker id="arrow-blue" viewBox="0 0 10 10" refX="22" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6" />
+                        </marker>
+                    </defs>
+                    <!-- 边容器 -->
+                    <g id="edges-layer"></g>
+                    <!-- 节点容器 -->
+                    <g id="nodes-layer"></g>
+                </svg>
+            </div>
+            
+            <!-- 图例 -->
+            <div class="mt-4 flex flex-wrap gap-4 text-sm justify-center">
+                <div class="flex items-center gap-2"><span class="w-4 h-4 rounded-full bg-slate-200 border border-slate-400"></span> 未访问</div>
+                <div class="flex items-center gap-2"><span class="w-4 h-4 rounded-full bg-yellow-100 border-2 border-yellow-400"></span> 发现/排队中</div>
+                <div class="flex items-center gap-2"><span class="w-4 h-4 rounded-full bg-purple-100 border-2 border-purple-500 border-dashed"></span> 划分为块(Chunk)</div>
+                <div class="flex items-center gap-2"><span class="w-4 h-4 rounded-full bg-blue-500 border-2 border-blue-700 shadow-[0_0_10px_rgba(59,130,246,0.5)]"></span> 处理中</div>
+                <div class="flex items-center gap-2"><span class="w-4 h-4 rounded-full bg-green-100 border-2 border-green-500"></span> 已确定最短路</div>
+            </div>
+        </section>
+
+        <!-- 右侧：数据结构与操作日志 -->
+        <section class="w-full lg:w-96 flex flex-col gap-4">
+            
+            <!-- 算法选择与控制 -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+                <div class="flex rounded-lg bg-slate-100 p-1 mb-3">
+                    <button id="btn-dijkstra" onclick="switchMode('dijkstra')" class="flex-1 py-1.5 text-sm font-medium rounded-md bg-white shadow-sm text-blue-600 transition-all">经典 Dijkstra</button>
+                    <button id="btn-newalgo" onclick="switchMode('newalgo')" class="flex-1 py-1.5 text-sm font-medium rounded-md text-slate-500 hover:text-slate-700 transition-all">新算法 (分块思想)</button>
+                </div>
+
+                <div class="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-100 min-h-[60px]">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">当前步骤说明</h3>
+                    <p id="step-description" class="text-sm text-slate-700 leading-relaxed font-medium">
+                        点击“下一步”开始演示。
+                    </p>
+                </div>
+                
+                <div class="flex justify-between items-center mt-4">
+                    <button onclick="prevStep()" class="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-sm transition disabled:opacity-50" id="btn-prev">上一步</button>
+                    <span id="step-indicator" class="text-sm font-bold text-slate-400">Step 0 / 0</span>
+                    <button onclick="nextStep()" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm shadow-sm transition disabled:opacity-50" id="btn-next">下一步</button>
+                </div>
+            </div>
+
+            <!-- 数据结构面板 -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex-1 flex flex-col">
+                <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2" id="ds-title">全局优先队列 (需严格排序)</h3>
+                <div id="ds-container" class="flex-1 bg-slate-50 rounded-xl p-3 border border-slate-100 overflow-y-auto space-y-1.5">
+                    <!-- 数据项通过 JS 注入 -->
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <script>
+        // === 图的基础坐标数据 (新增了远端节点 E) ===
+        const graphData = {
+            nodes: {
+                'S': { x: 50, y: 210, label: 'S' },
+                'A': { x: 250, y: 50, label: 'A' },
+                'B': { x: 250, y: 130, label: 'B' },
+                'D': { x: 250, y: 210, label: 'D' },
+                'C': { x: 250, y: 290, label: 'C' },
+                'E': { x: 250, y: 370, label: 'E' }, // 新增的离得较远的节点
+                'T': { x: 450, y: 210, label: 'T' }
+            },
+            edges: [
+                { id: 'S-A', u: 'S', v: 'A', w: 2 },
+                { id: 'S-B', u: 'S', v: 'B', w: 3 },
+                { id: 'S-D', u: 'S', v: 'D', w: 3.5 },
+                { id: 'S-C', u: 'S', v: 'C', w: 4 },
+                { id: 'S-E', u: 'S', v: 'E', w: 8 }, // 远端边
+                { id: 'A-T', u: 'A', v: 'T', w: 8 },
+                { id: 'B-T', u: 'B', v: 'T', w: 7 },
+                { id: 'D-T', u: 'D', v: 'T', w: 6.5 },
+                { id: 'C-T', u: 'C', v: 'T', w: 6 },
+                { id: 'E-T', u: 'E', v: 'T', w: 4 }
+            ]
+        };
+
+        // === 预计算的动画状态 ===
+        // Dijkstra 状态机 (7个步骤)
+        const statesDijkstra = [
+            {
+                step: 0,
+                desc: "【初始状态】从源点 S 出发。Dijkstra 准备使用全局优先队列进行绝对严格的排序提取。",
+                nodes: { 'S':{d:0, s:'queued'}, 'A':{d:'∞', s:'unv'}, 'B':{d:'∞', s:'unv'}, 'C':{d:'∞', s:'unv'}, 'D':{d:'∞', s:'unv'}, 'E':{d:'∞', s:'unv'}, 'T':{d:'∞', s:'unv'} },
+                activeEdges: [],
+                dsTitle: "全局优先队列 (严格全排序)",
+                dsItems: [{text: "(0, S)", type: 'queued'}]
+            },
+            {
+                step: 1,
+                desc: "【扩展源点】处理 S，将所有邻居加入优先队列。注意队列中不仅有相近的 A/B/C/D，还有较远的 E(8)。",
+                nodes: { 'S':{d:0, s:'proc'}, 'A':{d:2, s:'queued'}, 'B':{d:3, s:'queued'}, 'D':{d:3.5, s:'queued'}, 'C':{d:4, s:'queued'}, 'E':{d:8, s:'queued'}, 'T':{d:'∞', s:'unv'} },
+                activeEdges: ['S-A', 'S-B', 'S-D', 'S-C', 'S-E'],
+                dsTitle: "全局优先队列 (严格全排序)",
+                dsItems: [
+                    {text: "(2, A)", type: 'queued'}, {text: "(3, B)", type: 'queued'}, 
+                    {text: "(3.5, D)", type: 'queued'}, {text: "(4, C)", type: 'queued'}, {text: "(8, E)", type: 'queued'}
+                ]
+            },
+            {
+                step: 2,
+                desc: "【痛苦的开始】在 5 个节点中进行 O(log n) 严格排序，强行分出高下，提取了绝对最小的 A。",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'proc'}, 'B':{d:3, s:'queued'}, 'D':{d:3.5, s:'queued'}, 'C':{d:4, s:'queued'}, 'E':{d:8, s:'queued'}, 'T':{d:10, s:'queued'} },
+                activeEdges: ['A-T'],
+                dsTitle: "全局优先队列 (严格全排序)",
+                dsItems: [
+                    {text: "(3, B)", type: 'queued'}, {text: "(3.5, D)", type: 'queued'}, 
+                    {text: "(4, C)", type: 'queued'}, {text: "(8, E)", type: 'queued'}, {text: "(10, T)", type: 'queued'}
+                ]
+            },
+            {
+                step: 3,
+                desc: "【继续排序】重新排序，挑出 B。尽管 A 和 B, D 距离极近，Dijkstra 依然机械地逐个比较。",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'done'}, 'B':{d:3, s:'proc'}, 'D':{d:3.5, s:'queued'}, 'C':{d:4, s:'queued'}, 'E':{d:8, s:'queued'}, 'T':{d:10, s:'queued'} },
+                activeEdges: ['B-T'],
+                dsTitle: "全局优先队列 (严格全排序)",
+                dsItems: [
+                    {text: "(3.5, D)", type: 'queued'}, {text: "(4, C)", type: 'queued'}, {text: "(8, E)", type: 'queued'}, {text: "(10, T)", type: 'queued'}
+                ]
+            },
+            {
+                step: 4,
+                desc: "【排序障碍】继续弹出 D。每次弹出都在消耗算力维护整个全局堆的绝对秩序。",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'done'}, 'B':{d:3, s:'done'}, 'D':{d:3.5, s:'proc'}, 'C':{d:4, s:'queued'}, 'E':{d:8, s:'queued'}, 'T':{d:10, s:'queued'} },
+                activeEdges: ['D-T'],
+                dsTitle: "全局优先队列 (严格全排序)",
+                dsItems: [
+                    {text: "(4, C)", type: 'queued'}, {text: "(8, E)", type: 'queued'}, {text: "(10, T)", type: 'queued'}
+                ]
+            },
+            {
+                step: 5,
+                desc: "【近端结束】弹出 C。至此，距离相近的这一批节点终于一个个排队处理完了。",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'done'}, 'B':{d:3, s:'done'}, 'D':{d:3.5, s:'done'}, 'C':{d:4, s:'proc'}, 'E':{d:8, s:'queued'}, 'T':{d:10, s:'queued'} },
+                activeEdges: ['C-T'],
+                dsTitle: "全局优先队列 (严格全排序)",
+                dsItems: [
+                    {text: "(8, E)", type: 'queued'}, {text: "(10, T)", type: 'queued'}
+                ]
+            },
+            {
+                step: 6,
+                desc: "【处理远端】现在轮到较远的 E 了。Dijkstra 不分情况，所有节点不论远近都必须在全局堆里走一遭。",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'done'}, 'B':{d:3, s:'done'}, 'D':{d:3.5, s:'done'}, 'C':{d:4, s:'done'}, 'E':{d:8, s:'proc'}, 'T':{d:10, s:'queued'} },
+                activeEdges: ['E-T'],
+                dsTitle: "全局优先队列 (严格全排序)",
+                dsItems: [
+                    {text: "(10, T)", type: 'queued'}
+                ]
+            },
+            {
+                step: 7,
+                desc: "【结束】到达终点 T。经典算法总共进行了 6 次严格的堆提取和排序维护。",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'done'}, 'B':{d:3, s:'done'}, 'D':{d:3.5, s:'done'}, 'C':{d:4, s:'done'}, 'E':{d:8, s:'done'}, 'T':{d:10, s:'proc'} },
+                activeEdges: [],
+                dsTitle: "完成",
+                dsItems: []
+            }
+        ];
+
+        // 新算法概念状态机 (Chunking / 动态过滤)
+        const statesNewAlgo = [
+            {
+                step: 0,
+                desc: "【初始状态】源点 S 加入。新算法抛弃了全局严格优先队列，改用无序的活跃集 (Active Set)。",
+                nodes: { 'S':{d:0, s:'queued'}, 'A':{d:'∞', s:'unv'}, 'B':{d:'∞', s:'unv'}, 'C':{d:'∞', s:'unv'}, 'D':{d:'∞', s:'unv'}, 'E':{d:'∞', s:'unv'}, 'T':{d:'∞', s:'unv'} },
+                activeEdges: [],
+                dsTitle: "未排序活跃集 (Active Set)",
+                dsItems: [{text: "节点 S (d=0)", type: 'queued'}]
+            },
+            {
+                step: 1,
+                desc: "【扩展源点】提取 S，将所有邻居 (A,B,C,D,E) 统统扔进无序活跃集。不进行任何 O(log n) 的全排序！",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'queued'}, 'B':{d:3, s:'queued'}, 'C':{d:4, s:'queued'}, 'D':{d:3.5, s:'queued'}, 'E':{d:8, s:'queued'}, 'T':{d:'∞', s:'unv'} },
+                activeEdges: ['S-A', 'S-B', 'S-D', 'S-C', 'S-E'],
+                dsTitle: "未排序活跃集 (Active Set)",
+                dsItems: [
+                    {text: "节点 A (d=2)", type: 'queued'}, {text: "节点 B (d=3)", type: 'queued'}, 
+                    {text: "节点 D (d=3.5)", type: 'queued'}, {text: "节点 C (d=4)", type: 'queued'}, {text: "节点 E (d=8)", type: 'queued'}
+                ]
+            },
+            {
+                step: 2,
+                desc: "【计算阈值，精准过滤】算法估算当前基准 Pivot = 2，设宽容阈值 = 4。\n⚠️ 注意看右侧：节点 E(d=8) 因为超出阈值，被聪明地过滤掉了！它不会被错误打包。",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'queued'}, 'B':{d:3, s:'queued'}, 'C':{d:4, s:'queued'}, 'D':{d:3.5, s:'queued'}, 'E':{d:8, s:'queued'}, 'T':{d:'∞', s:'unv'} },
+                activeEdges: [],
+                dsTitle: "计算宏观阈值",
+                dsItems: [
+                    {text: "⚡ 估算 Pivot = 2", type: 'info'},
+                    {text: "⚡ 设定 块阈值 = 4", type: 'info'},
+                    {text: "🎯 目标：仅圈定 d ≤ 4 的节点", type: 'info'},
+                    {text: "❌ 节点 E(d=8) 不符合条件，留在活跃集", type: 'info'}
+                ] 
+            },
+            {
+                step: 3,
+                desc: "【第一轮分块】直接将符合条件的 A, B, C, D 打包成宏观 Chunk 1。而较远的 E 依然留在外围等待下一次处理。",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'chunked'}, 'B':{d:3, s:'chunked'}, 'C':{d:4, s:'chunked'}, 'D':{d:3.5, s:'chunked'}, 'E':{d:8, s:'queued'}, 'T':{d:'∞', s:'unv'} },
+                activeEdges: [],
+                dsTitle: "形成 第一区块 (Chunk 1)",
+                dsItems: [
+                    {text: "📦 节点块 1: [A, B, D, C]", type: 'chunked'},
+                    {text: "⏳ 等待中: 节点 E (d=8)", type: 'queued'}
+                ]
+            },
+            {
+                step: 4,
+                desc: "【块内批量松弛】打破排序障碍的关键：对 Chunk 1 里的节点同时进行批量松弛！一次性搞定 Dijkstra 四次排序的工作。",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'proc'}, 'B':{d:3, s:'proc'}, 'C':{d:4, s:'proc'}, 'D':{d:3.5, s:'proc'}, 'E':{d:8, s:'queued'}, 'T':{d:10, s:'queued'} },
+                activeEdges: ['A-T', 'B-T', 'D-T', 'C-T'],
+                dsTitle: "批量处理 Chunk 1",
+                dsItems: [
+                    {text: "并行处理 A, B, D, C 的出边", type: 'proc'},
+                    {text: "发现终点 T(d=10)", type: 'queued'}
+                ]
+            },
+            {
+                step: 5,
+                desc: "【第二轮宏观推进】第一波处理完后，活跃集剩下 E(8) 和 T(10)。算法计算新 Pivot=8，阈值=10。瞬间将 [E, T] 划为第二个 Chunk！",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'done'}, 'B':{d:3, s:'done'}, 'C':{d:4, s:'done'}, 'D':{d:3.5, s:'done'}, 'E':{d:8, s:'chunked'}, 'T':{d:10, s:'chunked'} },
+                activeEdges: [],
+                dsTitle: "形成 第二区块 (Chunk 2)",
+                dsItems: [
+                    {text: "⚡ 新 Pivot = 8, 阈值 = 10", type: 'info'},
+                    {text: "📦 节点块 2: [E, T]", type: 'chunked'}
+                ]
+            },
+            {
+                step: 6,
+                desc: "【处理新区块】批量处理 E 和 T。原本 Dijkstra 跑这图需要 6 次堆操作全过程，新算法仅用了 2 次宏观的分块提取就搞定了！降维打击成功！",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'done'}, 'B':{d:3, s:'done'}, 'C':{d:4, s:'done'}, 'D':{d:3.5, s:'done'}, 'E':{d:8, s:'proc'}, 'T':{d:10, s:'proc'} },
+                activeEdges: ['E-T'],
+                dsTitle: "批量处理 Chunk 2",
+                dsItems: [
+                    {text: "并行处理 E, T", type: 'proc'}
+                ]
+            },
+            {
+                step: 7,
+                desc: "【结束】到达终点 T。新算法不仅能利用局部无序性加速，还能通过动态阈值完美保证算法的正确性和宏观层次。",
+                nodes: { 'S':{d:0, s:'done'}, 'A':{d:2, s:'done'}, 'B':{d:3, s:'done'}, 'C':{d:4, s:'done'}, 'D':{d:3.5, s:'done'}, 'E':{d:8, s:'done'}, 'T':{d:10, s:'done'} },
+                activeEdges: [],
+                dsTitle: "完成",
+                dsItems: []
+            }
+        ];
+
+        let currentMode = 'dijkstra';
+        let currentStateIndex = 0;
+        let activeStates = statesDijkstra;
+
+        // === 渲染引擎 ===
+
+        function initGraph() {
+            const svgNodes = document.getElementById('nodes-layer');
+            const svgEdges = document.getElementById('edges-layer');
+            
+            // 绘制边
+            graphData.edges.forEach(edge => {
+                const u = graphData.nodes[edge.u];
+                const v = graphData.nodes[edge.v];
+                
+                // 计算线段的缩进，避免箭头被圆挡住
+                const dx = v.x - u.x;
+                const dy = v.y - u.y;
+                const angle = Math.atan2(dy, dx);
+                const r = 22; // 半径稍微大一点
+                const startX = u.x + r * Math.cos(angle);
+                const startY = u.y + r * Math.sin(angle);
+                const endX = v.x - r * Math.cos(angle);
+                const endY = v.y - r * Math.sin(angle);
+
+                // 线
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute("id", `edge-${edge.id}`);
+                line.setAttribute("x1", startX);
+                line.setAttribute("y1", startY);
+                line.setAttribute("x2", endX);
+                line.setAttribute("y2", endY);
+                line.setAttribute("stroke-width", "3");
+                line.setAttribute("stroke", "#e2e8f0"); // unvisited edge
+                line.setAttribute("marker-end", "url(#arrow-gray)");
+                line.classList.add('edge');
+                svgEdges.appendChild(line);
+
+                // 权重标签 (稍微偏离中心线一点，更美观)
+                const midX = (startX + endX) / 2;
+                const midY = (startY + endY) / 2;
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute("x", midX - 10 * Math.sin(angle));
+                text.setAttribute("y", midY + 10 * Math.cos(angle));
+                text.setAttribute("fill", "#64748b");
+                text.setAttribute("font-size", "12");
+                text.setAttribute("font-weight", "bold");
+                text.setAttribute("text-anchor", "middle");
+                text.setAttribute("dominant-baseline", "central");
+                text.textContent = edge.w;
+                svgEdges.appendChild(text);
+            });
+
+            // 绘制节点
+            for (const [id, node] of Object.entries(graphData.nodes)) {
+                const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                g.setAttribute("id", `node-group-${id}`);
+                
+                // 圆形
+                const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                circle.setAttribute("id", `node-${id}`);
+                circle.setAttribute("cx", node.x);
+                circle.setAttribute("cy", node.y);
+                circle.setAttribute("r", "20");
+                circle.setAttribute("fill", "#f1f5f9");
+                circle.setAttribute("stroke", "#cbd5e1");
+                circle.setAttribute("stroke-width", "3");
+                circle.classList.add('node');
+                
+                // 节点名字 (中心)
+                const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                label.setAttribute("x", node.x);
+                label.setAttribute("y", node.y);
+                label.setAttribute("text-anchor", "middle");
+                label.setAttribute("dominant-baseline", "central");
+                label.setAttribute("font-weight", "bold");
+                label.setAttribute("fill", "#334155");
+                label.setAttribute("font-size", "14");
+                label.textContent = id;
+                label.style.pointerEvents = "none";
+
+                // 距离标签 (下方)
+                const distLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                distLabel.setAttribute("id", `dist-${id}`);
+                distLabel.setAttribute("x", node.x);
+                distLabel.setAttribute("y", node.y + 35);
+                distLabel.setAttribute("text-anchor", "middle");
+                distLabel.setAttribute("font-weight", "bold");
+                distLabel.setAttribute("fill", "#94a3b8");
+                distLabel.setAttribute("font-size", "14");
+                distLabel.classList.add('distance-label');
+                distLabel.textContent = "d=∞";
+
+                g.appendChild(circle);
+                g.appendChild(label);
+                g.appendChild(distLabel);
+                svgNodes.appendChild(g);
+            }
+        }
+
+        function renderState(stateIndex) {
+            const state = activeStates[stateIndex];
+            
+            // 更新 UI 控制
+            document.getElementById('step-indicator').textContent = `Step ${stateIndex} / ${activeStates.length - 1}`;
+            document.getElementById('btn-prev').disabled = stateIndex === 0;
+            document.getElementById('btn-next').disabled = stateIndex === activeStates.length - 1;
+
+            // 更新文本解说
+            document.getElementById('step-description').innerText = state.desc;
+
+            // 更新数据结构面板
+            document.getElementById('ds-title').innerText = state.dsTitle;
+            const dsContainer = document.getElementById('ds-container');
+            dsContainer.innerHTML = '';
+            state.dsItems.forEach(item => {
+                const el = document.createElement('div');
+                el.className = `data-item px-3 py-1.5 rounded-lg border font-mono text-sm shadow-sm ${
+                    item.type === 'queued' ? 'bg-yellow-50 border-yellow-200 text-yellow-800' :
+                    item.type === 'proc' ? 'bg-blue-500 border-blue-600 text-white font-bold shadow-md transform scale-105' : 
+                    item.type === 'chunked' ? 'bg-purple-100 border-purple-300 text-purple-800 font-bold border-2 border-dashed' :
+                    item.type === 'info' ? 'bg-slate-100 border-slate-300 text-slate-700' :
+                    'bg-white border-slate-200 text-slate-600'
+                }`;
+                el.innerText = item.text;
+                dsContainer.appendChild(el);
+            });
+
+            // 更新节点视觉
+            for (const [id, nodeState] of Object.entries(state.nodes)) {
+                const circle = document.getElementById(`node-${id}`);
+                const distLabel = document.getElementById(`dist-${id}`);
+                
+                // 更新距离文本
+                distLabel.textContent = `d=${nodeState.d}`;
+                
+                // 恢复默认
+                circle.setAttribute("fill", "#f1f5f9");
+                circle.setAttribute("stroke", "#cbd5e1");
+                circle.style.filter = "none";
+                distLabel.setAttribute("fill", "#94a3b8");
+
+                // 根据状态上色
+                if (nodeState.s === 'queued') {
+                    circle.setAttribute("fill", "#fef9c3"); // yellow-100
+                    circle.setAttribute("stroke", "#facc15"); // yellow-400
+                    distLabel.setAttribute("fill", "#ca8a04");
+                } else if (nodeState.s === 'chunked') {
+                    circle.setAttribute("fill", "#f3e8ff"); // purple-100
+                    circle.setAttribute("stroke", "#a855f7"); // purple-500
+                    distLabel.setAttribute("fill", "#7e22ce"); // purple-700
+                } else if (nodeState.s === 'proc') {
+                    circle.setAttribute("fill", "#3b82f6"); // blue-500
+                    circle.setAttribute("stroke", "#1d4ed8"); // blue-700
+                    circle.style.filter = "drop-shadow(0px 0px 8px rgba(59,130,246,0.6))";
+                    distLabel.setAttribute("fill", "#2563eb");
+                } else if (nodeState.s === 'done') {
+                    circle.setAttribute("fill", "#dcfce3"); // green-100
+                    circle.setAttribute("stroke", "#22c55e"); // green-500
+                    distLabel.setAttribute("fill", "#16a34a");
+                }
+            }
+
+            // 更新边视觉
+            graphData.edges.forEach(edge => {
+                const line = document.getElementById(`edge-${edge.id}`);
+                if (state.activeEdges.includes(edge.id)) {
+                    line.setAttribute("stroke", "#3b82f6"); // blue
+                    line.setAttribute("stroke-width", "4");
+                    line.setAttribute("marker-end", "url(#arrow-blue)");
+                } else {
+                    line.setAttribute("stroke", "#e2e8f0"); // gray
+                    line.setAttribute("stroke-width", "3");
+                    line.setAttribute("marker-end", "url(#arrow-gray)");
+                }
+            });
+        }
+
+        // === 交互逻辑 ===
+
+        function switchMode(mode) {
+            currentMode = mode;
+            const btnDij = document.getElementById('btn-dijkstra');
+            const btnNew = document.getElementById('btn-newalgo');
+
+            if (mode === 'dijkstra') {
+                btnDij.className = "flex-1 py-2 text-sm font-medium rounded-md bg-white shadow-sm text-blue-600 transition-all";
+                btnNew.className = "flex-1 py-2 text-sm font-medium rounded-md text-slate-500 hover:text-slate-700 transition-all";
+                activeStates = statesDijkstra;
+            } else {
+                btnNew.className = "flex-1 py-2 text-sm font-medium rounded-md bg-white shadow-sm text-blue-600 transition-all";
+                btnDij.className = "flex-1 py-2 text-sm font-medium rounded-md text-slate-500 hover:text-slate-700 transition-all";
+                activeStates = statesNewAlgo;
+            }
+            
+            currentStateIndex = 0;
+            renderState(currentStateIndex);
+        }
+
+        function nextStep() {
+            if (currentStateIndex < activeStates.length - 1) {
+                currentStateIndex++;
+                renderState(currentStateIndex);
+            }
+        }
+
+        function prevStep() {
+            if (currentStateIndex > 0) {
+                currentStateIndex--;
+                renderState(currentStateIndex);
+            }
+        }
+
+        // 初始化
+        window.onload = () => {
+            initGraph();
+            renderState(0);
+        };
+    </script>
+</body>
+</html>
